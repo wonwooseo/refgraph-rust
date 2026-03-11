@@ -1,0 +1,12 @@
+[package]
+name = "refgraph-rust"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-graphql = { version = "7.2.1", features = ["dataloader"] }
+async-graphql-axum = "7.2.1"
+axum = "0.8.8"
+serde = { version = "1.0.228", features = ["derive"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "postgres", "chrono"] }
+tokio = { version = "1.50.0", features = ["full"] }
