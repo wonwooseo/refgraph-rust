@@ -10,3 +10,5 @@ axum = "0.8.8"
 serde = { version = "1.0.228", features = ["derive"] }
 sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "postgres", "chrono"] }
 tokio = { version = "1.50.0", features = ["full"] }
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
