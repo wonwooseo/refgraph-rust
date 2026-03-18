@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize, Serializer};
-use sqlx::{FromRow, PgPool};
+use sqlx::FromRow;
 use chrono::NaiveDateTime;
 
 fn serialize_naive_datetime_as_rfc3339<S>(dt: &NaiveDateTime, serializer: S) -> Result<S::Ok, S::Error>
@@ -22,37 +22,46 @@ pub struct Ref {
 }
 
 impl Ref {
-    pub async fn insert(
-        pool: &PgPool,
+    pub async fn insert<'e, E>(
+        executor: E,
         code: &str,
         path: &str,
-    ) -> Result<Self, sqlx::Error> {
+    ) -> Result<Self, sqlx::Error>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    {
         sqlx::query_as::<_, Ref>(
             "INSERT INTO refs (code, path) VALUES ($1, $2::ltree) \
-             RETURNING code, path::text as path, created_at, updated_at",
+             RETURNING code, path::text as path, point, created_at, updated_at",
         )
         .bind(code)
         .bind(path)
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await
     }
 
-    pub async fn select_by_code(pool: &PgPool, code: &str) -> Result<Option<Self>, sqlx::Error> {
+    pub async fn select_by_code<'e, E>(executor: E, code: &str) -> Result<Option<Self>, sqlx::Error>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    {
         sqlx::query_as::<_, Ref>(
-            "SELECT code, path::text as path, created_at, updated_at FROM refs WHERE code = $1",
+            "SELECT code, path::text as path, point, created_at, updated_at FROM refs WHERE code = $1",
         )
         .bind(code)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await
     }
 
-    pub async fn update_point(pool: &PgPool, code: &str, increment: i32) -> Result<(), sqlx::Error> {
+    pub async fn update_point<'e, E>(executor: E, code: &str, increment: i32) -> Result<(), sqlx::Error>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    {
         sqlx::query(
             "UPDATE refs SET point = point + $1, updated_at = NOW() WHERE code = $2",
         )
         .bind(increment)
         .bind(code)
-        .execute(pool)
+        .execute(executor)
         .await
         .map(|_| ())
     }

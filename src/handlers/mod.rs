@@ -38,12 +38,18 @@ pub async fn create_ref(
     let referrer_code = payload.referrer_code.as_deref().unwrap_or("").trim();
     let new_code = generate_random_base32_code();
 
+    // Ensure the insert + point updates happen in a transaction.
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(err) => return Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
+    };
+
     let new_path = if referrer_code.is_empty() {
         // Root ref
         new_code.clone()
     } else {
         // Child ref
-        let parent = match Ref::select_by_code(&pool, referrer_code).await {
+        let parent = match Ref::select_by_code(&mut *tx, referrer_code).await {
             Ok(Some(p)) => p,
             Ok(None) => return Err((StatusCode::BAD_REQUEST, "Invalid referrer code".to_string())),
             Err(err) => return Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
@@ -51,7 +57,7 @@ pub async fn create_ref(
         format!("{}.{}", parent.path, new_code)
     };
 
-    match Ref::insert(&pool, &new_code, &new_path).await {
+    match Ref::insert(&mut *tx, &new_code, &new_path).await {
         Ok(r) => {
             // Increment points for ancestors up to 5 steps
             if !referrer_code.is_empty() {
@@ -59,7 +65,7 @@ pub async fn create_ref(
                 let mut current_points = 5;
                 for i in (0..path_parts.len() - 1).rev().take(5) {
                     let ancestor_code = path_parts[i];
-                    if let Err(err) = Ref::update_point(&pool, ancestor_code, current_points).await {
+                    if let Err(err) = Ref::update_point(&mut *tx, ancestor_code, current_points).await {
                         eprintln!("Failed to update points for ancestor {}: {}", ancestor_code, err);
                         return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to update ancestor points".into()));
                     }
@@ -69,6 +75,12 @@ pub async fn create_ref(
                     }
                 }
             }
+
+            if let Err(err) = tx.commit().await {
+                eprintln!("failed to commit transaction: {err}");
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to commit transaction".into()));
+            }
+
             Ok((StatusCode::CREATED, Json(r)))
         }
         Err(err) => {
