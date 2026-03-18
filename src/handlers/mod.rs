@@ -19,7 +19,7 @@ pub async fn get_ref(
     Extension(pool): Extension<PgPool>,
     Path(code): Path<String>,
 ) -> Result<Json<Ref>, (StatusCode, String)> {
-    match Ref::load_by_code(&pool, &code).await {
+    match Ref::select_by_code(&pool, &code).await {
         Ok(Some(r)) => Ok(Json(r)),
         Ok(None) => Err((StatusCode::NOT_FOUND, "Ref not found".to_string())),
         Err(err) => Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
@@ -43,7 +43,7 @@ pub async fn create_ref(
         new_code.clone()
     } else {
         // Child ref
-        let parent = match Ref::load_by_code(&pool, referrer_code).await {
+        let parent = match Ref::select_by_code(&pool, referrer_code).await {
             Ok(Some(p)) => p,
             Ok(None) => return Err((StatusCode::BAD_REQUEST, "Invalid referrer code".to_string())),
             Err(err) => return Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
@@ -52,7 +52,25 @@ pub async fn create_ref(
     };
 
     match Ref::insert(&pool, &new_code, &new_path).await {
-        Ok(r) => Ok((StatusCode::CREATED, Json(r))),
+        Ok(r) => {
+            // Increment points for ancestors up to 5 steps
+            if !referrer_code.is_empty() {
+                let path_parts: Vec<&str> = new_path.split('.').collect();
+                let mut current_points = 5;
+                for i in (0..path_parts.len() - 1).rev().take(5) {
+                    let ancestor_code = path_parts[i];
+                    if let Err(err) = Ref::update_point(&pool, ancestor_code, current_points).await {
+                        eprintln!("Failed to update points for ancestor {}: {}", ancestor_code, err);
+                        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to update ancestor points".into()));
+                    }
+                    current_points -= 1;
+                    if current_points == 0 {
+                        break;
+                    }
+                }
+            }
+            Ok((StatusCode::CREATED, Json(r)))
+        }
         Err(err) => {
             eprintln!("failed to insert ref: {err}");
             Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to insert ref".into()))
